@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import type {
   FavoriteProduct,
@@ -179,3 +180,47 @@ export async function getUserFavoriteProductIds(): Promise<string[]> {
 
   return (data ?? []).map((row) => row.product_id);
 }
+
+export interface CatalogCostProfile {
+  /** Median credit cost of a Filter transformation across the catalogue. */
+  filterCost: number;
+  /** Median credit cost of a Poster generation (image + layout render). */
+  posterCost: number;
+}
+
+const FALLBACK_FILTER_COST = 6;
+const FALLBACK_POSTER_COST = 12;
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? Math.round((sorted[mid - 1]! + sorted[mid]!) / 2)
+    : sorted[mid]!;
+}
+
+/**
+ * Median credit cost per product type — powers the pricing plan-finder's
+ * "≈ N credits each" labels and monthly estimate. Falls back to fixed
+ * defaults when the catalogue is empty.
+ */
+export const getCatalogCostProfile = cache(async function getCatalogCostProfile(): Promise<CatalogCostProfile> {
+  const { data } = await getPublicProducts(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    "featured",
+    1,
+    200
+  );
+  const costs = (data ?? [])
+    .filter((p) => typeof p.credit_cost === "number" && p.credit_cost > 0);
+  const filters = costs.filter((p) => p.type === "filter").map((p) => p.credit_cost);
+  const posters = costs.filter((p) => p.type === "poster").map((p) => p.credit_cost);
+  return {
+    filterCost: median(filters) ?? FALLBACK_FILTER_COST,
+    posterCost: median(posters) ?? FALLBACK_POSTER_COST,
+  };
+});

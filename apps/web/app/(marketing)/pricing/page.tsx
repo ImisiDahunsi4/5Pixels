@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getPlansForPurchase } from "@/lib/db/plans";
+import { getCatalogCostProfile } from "@/lib/db/explore";
 import { getActivePlan } from "@/lib/billing/entitlements";
 import { PlanFinder } from "@/components/marketing/plan-finder";
 import { PricingComparison } from "@/components/marketing/pricing-comparison";
@@ -44,9 +45,10 @@ export default async function PricingPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [plans, activePlan] = await Promise.all([
+  const [plans, activePlan, costProfile] = await Promise.all([
     getPlansForPurchase(),
     getActivePlan(),
+    getCatalogCostProfile(),
   ]);
 
   const monthlyPlans = plans.filter((p) => p.type === "monthly");
@@ -257,13 +259,20 @@ export default async function PricingPage() {
           </p>
           <div className="mt-10">
             <PlanFinder
-              plans={monthlyPlans.map((p) => ({
-                id: p.id,
-                name: p.name,
-                creditsGrant: p.credits_grant,
-                priceCents: p.price_cents,
-                markupMultiplier: p.markup_multiplier,
-              }))}
+              plans={plans
+                .filter(
+                  (p) => p.type === "monthly" || p.type === "weekly_trial"
+                )
+                .map((p) => ({
+                  id: p.id,
+                  slug: p.slug,
+                  name: p.name.replace("Weekly Trial - ", ""),
+                  type: p.type,
+                  creditsGrant: p.credits_grant,
+                  priceCents: p.price_cents,
+                  checkoutReady: Boolean(p.dodo_product_id),
+                }))}
+              costs={costProfile}
               isAuthenticated={Boolean(user)}
             />
           </div>
