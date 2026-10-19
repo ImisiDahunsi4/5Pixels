@@ -11,13 +11,22 @@ customer-facing environment until every box is checked and the owner signs.**
 
 ## Preconditions
 
-- [ ] `OPENAI_API_KEY` provisioned in Vercel for the **preview/staging**
-      environment only — server-side var, never `NEXT_PUBLIC_*`. Confirm the
-      var exists (`vercel env ls`) and is scoped to preview, not production.
-- [ ] `PRESET_USER_PROMPT_ENABLED=true` **only on a gated preview deployment**
-      used for this run. Leave it off in staging/prod. The DB
-      `release_gates('preset_user_prompt')` row stays OFF; if the test preset
-      needs the gate, use the staging DB only and revert after the run.
+- [ ] `OPENAI_API_KEY` provisioned in Vercel — **done** (preview + prod listed,
+      confirmed by the A-section run on 2026-10-19).
+- [ ] Hosted migrations applied — **pending** (tip `20261027000001` as of
+      2026-10-19; five files pending through `20261031000001`).
+- [ ] Fresh preview deployment carrying the moderation path.
+
+**Gate note — most of Section B needs no release gate at all.** With
+`OPENAI_API_KEY` configured, the screen fires for every generation's
+user-entered option text even when custom prompts are unreleased. So B3–B7
+run on an ordinary preview deploy with `PRESET_USER_PROMPT_ENABLED` OFF and
+the `release_gates` row OFF — zero gate surface opened. Only B1–B2 (the
+literal custom-prompt path) need `PRESET_USER_PROMPT_ENABLED=true` on the
+preview deployment plus the DB gate — schedule those as a brief, supervised
+window and revert immediately after; the env flag alone gates the public
+surface, but treat the DB row flip as a release action requiring owner go.
+
 - [ ] One test account + one admin-published preset with
       `prompt_override_enabled` on a prompt-capable route
       (e.g. `fal-ai/nano-banana-2/edit`) and a second preset WITHOUT prompt
@@ -98,9 +107,9 @@ order by created_at;
 
 | Case | Result | Verified by | Date |
 |---|---|---|---|
-| A1–A5 endpoint contract | | | |
-| B1–B7 hosted action path | | | |
-| Privacy/AUP/Terms wording (#172) | | | |
+| A1–A5 endpoint contract | **PASS** — A1 benign `allow`; A2 prohibited `blocked` [`illicit`, `illicit/violent`]; A3 batch `blocked` (same categories); A4 invalid key → `unavailable` (real 401); A5 unreachable → `unavailable` | Devin (`openai-moderation-smoke.mjs`, real key) | 2026-10-19 |
+| B1–B7 hosted action path | pending — hosted migrations (tip `20261027000001`) and fresh preview deploy | | |
+| Privacy/AUP/Terms wording (#172) | held PR #219 — pending owner/legal sign-off | | |
 
 **Release remains blocked** until all rows pass AND: Bachs approval scope is
 documented in #173, legal copy is signed off under #172, and the owner
