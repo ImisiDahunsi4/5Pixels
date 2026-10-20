@@ -48,6 +48,7 @@ async function makeStaff(client: Client): Promise<string> {
 interface SourceOpts {
   type?: "filter" | "poster";
   state?: string;
+  status?: string;
 }
 
 /**
@@ -68,9 +69,15 @@ async function makeRichSource(
        public_prompt_recipe, public_status, visibility, likeness_level,
        featured_rank, metadata
      ) VALUES ($1, $2, $3, $4, 'short copy', 'long copy',
-       'public recipe', 'active', 'public', 'creative', 3,
+       'public recipe', $5, 'public', 'creative', 3,
        '{"filter_config":{"intensity":0.7},"prompt_ui":{"placeholder":"Describe your tweak","examples":["warmer","softer light"],"helper":"Short plain-English edits only"}}'::jsonb)`,
-    [productId, opts.type ?? "filter", slug, `Source ${slug}`]
+    [
+      productId,
+      opts.type ?? "filter",
+      slug,
+      `Source ${slug}`,
+      opts.status ?? "active",
+    ]
   );
   await client.query(
     `INSERT INTO public.product_versions (
@@ -813,6 +820,109 @@ describe("admin_update_product — atomic save", () => {
           helper: "Short plain-English edits only",
         },
       });
+    });
+  });
+
+  it("rejects catalog activation when no version is published", async () => {
+    await withDb(async (client) => {
+      const staffId = await makeStaff(client);
+      const { userId: ownerId } = await makeUser(client);
+      // Draft product whose only version is a draft — the Retro Slam
+      // Manga anomaly path: status must not reach 'active' via save.
+      const { productId, versionId } = await makeRichSource(client, ownerId, {
+        status: "draft",
+        state: "draft",
+      });
+
+      await expect(
+        asUser(client, staffId, () =>
+          client.query(
+            `SELECT public.admin_update_product($1, $2, $3, $4, NULL)`,
+            [
+              productId,
+              JSON.stringify({ name: "Activated", public_status: "active" }),
+              versionId,
+              JSON.stringify({ credit_cost: 42 }),
+            ]
+          )
+        )
+      ).rejects.toThrow(/requires an active version/i);
+
+      // Atomic: the rename did not persist either.
+      const { rows } = await asService(client, () =>
+        client.query(
+          `SELECT name, public_status FROM public.products WHERE id = $1`,
+          [productId]
+        )
+      );
+      expect(rows[0].public_status).toBe("draft");
+      expect(rows[0].name).not.toBe("Activated");
+    });
+  });
+
+  it("allows activation through save when an active version exists", async () => {
+    await withDb(async (client) => {
+      const staffId = await makeStaff(client);
+      const { userId: ownerId } = await makeUser(client);
+      // Paused product with a published version — legitimate reactivation.
+      const { productId, versionId } = await makeRichSource(client, ownerId, {
+        status: "paused",
+        state: "active",
+      });
+
+      await asUser(client, staffId, () =>
+        client.query(
+          `SELECT public.admin_update_product($1, $2, $3, $4, NULL)`,
+          [
+            productId,
+            JSON.stringify({ public_status: "active" }),
+            versionId,
+            JSON.stringify({ credit_cost: 42 }),
+          ]
+        )
+      );
+
+      const { rows } = await asService(client, () =>
+        client.query(
+          `SELECT public_status FROM public.products WHERE id = $1`,
+          [productId]
+        )
+      );
+      expect(rows[0].public_status).toBe("active");
+    });
+  });
+
+  it("keeps already-active products editable even with only drafts", async () => {
+    await withDb(async (client) => {
+      const staffId = await makeStaff(client);
+      const { userId: ownerId } = await makeUser(client);
+      // The existing anomaly shape: status 'active' + only draft versions.
+      // The save must still succeed so the record stays repairable — the
+      // rule only gates the transition INTO active.
+      const { productId, versionId } = await makeRichSource(client, ownerId, {
+        status: "active",
+        state: "draft",
+      });
+
+      await asUser(client, staffId, () =>
+        client.query(
+          `SELECT public.admin_update_product($1, $2, $3, $4, NULL)`,
+          [
+            productId,
+            JSON.stringify({ name: "Repaired" }),
+            versionId,
+            JSON.stringify({ credit_cost: 42 }),
+          ]
+        )
+      );
+
+      const { rows } = await asService(client, () =>
+        client.query(
+          `SELECT name, public_status FROM public.products WHERE id = $1`,
+          [productId]
+        )
+      );
+      expect(rows[0]).toMatchObject({ name: "Repaired", public_status: "active" });
     });
   });
 

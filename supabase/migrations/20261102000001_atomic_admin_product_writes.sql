@@ -226,6 +226,21 @@ BEGIN
     NULL::public.products, to_jsonb(v_before) || p_product
   );
 
+  -- Catalog activation must go through a published recipe — the same rule
+  -- transition_product_status() enforces; a save must not bypass it by
+  -- writing public_status directly. Products that are already 'active'
+  -- keep saving so their metadata remains editable/repairable; only the
+  -- transition INTO active is gated here.
+  IF v_before.public_status IS DISTINCT FROM 'active'
+     AND v_p.public_status = 'active'
+     AND NOT EXISTS (
+       SELECT 1 FROM public.product_versions
+       WHERE product_id = p_product_id AND state = 'active'
+     ) THEN
+    RAISE EXCEPTION
+      'A product requires an active version before it can be activated';
+  END IF;
+
   UPDATE public.products SET
     type = v_p.type,
     slug = v_p.slug,

@@ -216,6 +216,10 @@ export async function createProduct(input: ProductCreateInput) {
     .from("products")
     .insert({
       ...productData,
+      // A new product can never carry a published recipe — activation only
+      // happens via publish_product_version/transition_product_status once
+      // an active version exists (#233 activation guard).
+      public_status: "draft",
       metadata: {
         filter_config,
         poster_config,
